@@ -69,19 +69,69 @@ class spXunlei
         }
     }
 
-    public function addTask($url)
+    public function log($message, $level=LOG_INFO)
     {
-        if (strpos($url, 'magnet:') === 0) {
-            return $this->addMagnet($url);
-        } else if (strpos($url, 'ed2k://|file') === 0) {
-            return $this->addEd2k($url);
-        } else {
+        $level_text = array(
+            LOG_INFO    =>  'INFO',
+            LOG_ERR     =>  'ERROR',
+            LOG_NOTICE  =>  'NOTICE',
+            LOG_WARNING =>  'WARNING',
+        );
+        $level = isset($level_text[$level]) ? $level_text[$level] : 'INFO';
 
+        $message = date('Y-m-d H:i:s') . "[{$level}] " . trim($message);
+
+        if (php_sapi_name() == 'cli') {
+            # write to stderr
+            fwrite(STDERR, "{$message}\n");
+        }
+
+        error_log($message, 3, $this->config->log_file);
+    }
+
+    public function logException($e)
+    {
+        $this->log("{$e->getMessage()}#{$e->getCode()}", LOG_ERR);
+    }
+
+    /**
+     * add download task
+     *
+     * @param string $url
+     * @param array $options
+     * @return bool
+     */
+    public function addTask($url, $options=array())
+    {
+        $this->log("Add task: " . $url);
+        try {
+            if (strpos($url, 'magnet:') === 0) {
+                $this->addMagnet($url, $options);
+            } else if (strpos($url, 'ed2k://|file') === 0) {
+                $this->addEd2k($url, $options);
+            } else if (strpos($url, 'http://') === 0 ||
+                strpos($url, 'https://') === 0 ||
+                strpos($url, 'ftp://') === 0 ||
+                strpos($url, 'thunder://') === 0 ||
+                strpos($url, 'flashget://') === 0 ||
+                strpos($url, 'qqdl://') === 0 ||
+                strpos($url, 'mms://') === 0 ||
+                strpos($url, 'rtsp://') === 0
+            ){
+                $this->addDefault($url, $options);
+            } else {
+                throw new SPException('URL not supported yet');
+            }
+            return true;
+        } catch (Exception $e) {
+            $this->logException($e);
+            return false;
         }
     }
 
     public function queryTaskUrl($task_url)
     {
+        $this->log('Query task url: ' . $task_url);
         # xml http?
         $url = 'http://dynamic.cloud.vip.xunlei.com/interface/url_query?callback=queryUrl&u='.urlencode($task_url).'&interfrom=task&random=1373351089035142391.49535565483&tcache=1373351093166';
 
@@ -92,6 +142,17 @@ class spXunlei
             $s
         );
         $j = json_decode($fake_json, true);
+        if (!$j) {
+            throw new SPException('Query task url: failed, invalid json?');
+        }
+        $this->log('Query task url: '  . "\tinfohash={$j[1]}");
+        $this->log('Query task url: '  . "\tfsize={$j[2]}");
+        $this->log('Query task url: '  . "\tbt_title={$j[3]}");
+
+        $this->log('Query task url: '  . "\tfilelist:");
+        foreach ($j[5] as $k=>$file) {
+            $this->log('Query task url:' . "\t".($j[8][$k] ? '+' : '')."\t{$file} [{$j[6][$k]}]" );
+        }
 
         return array(
             'flag'          =>  $j[0],
@@ -114,10 +175,11 @@ class spXunlei
      * add magnet link
      *
      * @param string $magnet
+     * @param array  $options
      * @return bool
      * @throws SPException
      */
-    public function addMagnet($magnet)
+    public function addMagnet($magnet, $options=array())
     {
         if (strpos($magnet, 'magnet:') !== 0) {
             throw new SPException('invalid magnet url');
@@ -132,6 +194,9 @@ class spXunlei
         # queryUrl(flag,infohash,fsize,bt_title,is_full,subtitle,subformatsize,size_list,valid_list,file_icon,findex,random,rtcode)
         $task_info = $this->queryTaskUrl($magnet);
 
+        $gdriveid = $this->getGDriveID();
+        $this->log('gdriveid=' . $gdriveid);
+
         $url = 'http://dynamic.cloud.vip.xunlei.com/interface/bt_task_commit?callback=jsonp1373350685430&t='.urlencode(strftime('%c')); #.'Tue%20Jul%2009%202013%2014:30:48%20GMT+0800%20(CST)';
         $post = 'uid=' . $this->cookie_store['userid'];
         $post .= '&btname=' . urlencode($task_info['bt_title']);
@@ -140,14 +205,34 @@ class spXunlei
         $post .= '&tsize=' . $task_info['fsize'];
         # findex=0_&size=296075521_
 
-        $post .= '&findex=' . implode('_', array_keys($task_info['size_list'])) . '_';
-        $post .= '&size=' . implode('_', $task_info['size_list']) . '_';
+        # valid_list
+        if (isset($options['bt_download_all'])) {
+            $findex = implode('_', array_keys($task_info['size_list'])) . '_';
+            $size = implode('_', $task_info['size_list']) . '_';
+            $this->log('Magnet: download all files');
+        } else {
+            $findex = '';
+            $size = '';
+            $this->log('Magnet: download valid files');
+            foreach ($task_info['valid_list'] as $k=>$v) {
+                if ($v == 0) continue;
+                $findex .= $k . '_';
+                $size .= $task_info['size_list'] . '_';
+
+                $this->log('Magnet:' . "\t\t{$task_info['subtitle'][$k]} [{$task_info['subformatsize'][$k]}]" );
+            }
+        }
+
+        $post .= '&findex=' . $findex;
+        $post .= '&size=' . $size;
         $post .= '&o_taskid=0&o_page=task&class_id=0&interfrom=task';
 
         $s = $this->http_post($url, $post);
 
+        $this->log('bt_task_commit: ' . $s);
+
         if (strpos($s, '"progress":1') === false) {
-            return false;
+            throw new SPException('Not yet downloaded');
         }
         $m = array();
         preg_match('#"id":"(\d+)"#', $s, $m);
@@ -160,19 +245,20 @@ class spXunlei
         $url .= '&interfrom=task&noCacheIE=';
 
         $s = $this->http_get($url);
+        $this->log('fill_bt_list: tid=' . $m[1] . ', infohash=' . $task_info['infohash']);
 
         $json = substr($s, strlen('fill_bt_list('), -1);
         $j = json_decode($json, true);
 
-        $gdriveid = $this->getGDriveID();
-
+        $cookie = 'gdriveid=' . $gdriveid;
         # send task:
         foreach ($j['Result']['Record'] as $file) {
-            if (empty($file['downurl'])) {
+            if ($file['download_status'] != 2 || empty($file['downurl'])) {
+                $this->log('Magnet: file not available yet. title='.$file['title']);
                 continue;
             }
+
             $url = $file['downurl'];
-            $cookie = 'gdriveid=' . $gdriveid;
             $title = $file['title'];
 
             $this->getDownloader()->download(
@@ -185,7 +271,7 @@ class spXunlei
             );
         }
     }
-/*
+
     public function queryTaskCid($url)
     {
         $url = 'http://dynamic.cloud.vip.xunlei.com/interface/task_check?callback=queryCid&url='.urlencode($url).'&interfrom=task&random=13734447016551856571.3246436683&tcache=1373444705857';
@@ -193,6 +279,7 @@ class spXunlei
         # queryCid('', '', '3517912090','1125730526239124', 'Flight.of.the.Navigator.1986.720p.BluRay.X264-7SinS.mkv', 0, 0, 0,'13734447016551856571.3246436683','movie','0')
         # queryCid(cid,gcid,file_size,avail_space,tname,goldbean_need,silverbean_need,is_full,random,type,rtcode)
         $s = $this->http_post($url, '');
+        $this->log('Query task cid: ' . $s);
 
         $fake_json = str_replace(
             array('queryCid(', 'new Array(', '\')', '\''),
@@ -204,8 +291,8 @@ class spXunlei
         $j = json_decode($fake_json, true);
 
         return array(
-         #   'cid'               =>  $j[0],
-         #   'gcid'              =>  $j[1],
+            'cid'               =>  $j[0],
+            'gcid'              =>  $j[1],
             'fsize'             =>  $j[2],
          #   'avail_space'       =>  $j[3],
             'tname'             =>  $j[4],
@@ -217,14 +304,15 @@ class spXunlei
          #   'rtcode'            =>  $j[12],
         );
     }
-*/
+
     /**
      * add ed2k link
      *
      * @param string $ed2k
+     * @param array  $options
      * @throws SPException
      */
-    public function addEd2k($ed2k)
+    public function addEd2k($ed2k, $options=array())
     {
         # ed2k://|file|Flight.of.the.Navigator.1986.720p.BluRay.X264-7SinS.mkv|3517912090|D7ABA3230E00007C9887A40106838614|h=H7GB4TSG5KJ7RTBZN7MU5H7XX5KQSHQ3|/
         if (strpos($ed2k, 'ed2k://|file|') !== 0) {
@@ -233,7 +321,10 @@ class spXunlei
         $str = substr(trim($ed2k), strlen('ed2k://|file|'));
         list($filename, $size, $hash, ) = explode('|', $str, 4);
 
-        # $task_info = $this->queryTaskUrl($ed2k);
+        $task_info = $this->queryTaskCid($ed2k);
+        if ($task_info['fsize'] === '0' && $task_info['cid'] === '' && $task_info['gcid'] === '') {
+            $this->log('ed2k: fsize=0, file not downloaded yet?');
+        }
 
         # http://dynamic.cloud.vip.xunlei.com/interface/task_commit?callback=ret_task&uid=139154715&cid=&gcid=&size=3517912090&goldbean=0&silverbean=0&t=Flight.of.the.Navigator.1986.720p.BluRay.X264-7SinS.mkv&url=ed2k%3A%2F%2F%7Cfile%7CFlight.of.the.Navigator.1986.720p.BluRay.X264-7SinS.mkv%7C3517912090%7CD7ABA3230E00007C9887A40106838614%7Ch%3DH7GB4TSG5KJ7RTBZN7MU5H7XX5KQSHQ3%7C%2F&type=2&o_page=history&o_taskid=0&class_id=0&database=undefined&interfrom=task&time=Wed%20Jul%2010%202013%2016:25:20%20GMT+0800%20(CST)&noCacheIE=1373444720566
         $url = 'http://dynamic.cloud.vip.xunlei.com/interface/task_commit?callback=ret_task';
@@ -245,7 +336,7 @@ class spXunlei
         $url .= '&url=' . urlencode($ed2k);
         $url .= '&type=2&o_page=history&o_taskid=0&class_id=0&database=undefined&interfrom=task';
         $url .= '&time='.urlencode(strftime('%c'));
-        $url .= '&noCacheIE=1373444720566';
+        $url .= '&noCacheIE=';
 
         $s = $this->http_get($url);
 
@@ -259,6 +350,7 @@ class spXunlei
             throw new SPException('failed to add ed2k task');
         }
         $task_id = $j[1];
+        $this->log('task_commit: output=' . $s);
 
         $j = $this->getTasks(1, 20);
         foreach ($j['info']['tasks'] as $task) {
@@ -270,10 +362,73 @@ class spXunlei
         if ($task['download_status'] != 2) {
             throw new SPException('download not finished');
         }
+        $this->log('task add: tid=' . $task_id . ' infohash=' . $task['cid']);
 
         $url = $task['lixian_url'];
         $cookie = 'gdriveid=' . $j['info']['user']['cookie'];
         $title = $filename;
+
+        $this->getDownloader()->download(
+            $url,
+            array(
+                'infohash'  =>  $task['cid'],
+                'cookie'    =>  $cookie,
+                'filename'  =>  $title,
+            )
+        );
+    }
+
+    public function addDefault($in_url, $options=array())
+    {
+        # ed2k://|file|Flight.of.the.Navigator.1986.720p.BluRay.X264-7SinS.mkv|3517912090|D7ABA3230E00007C9887A40106838614|h=H7GB4TSG5KJ7RTBZN7MU5H7XX5KQSHQ3|/
+
+        $task_info = $this->queryTaskCid($in_url);
+        if ($task_info['fsize'] === '0' && $task_info['cid'] === '' && $task_info['gcid'] === '') {
+            $this->log('ed2k: fsize=0, file not downloaded yet?');
+        }
+
+        # http://dynamic.cloud.vip.xunlei.com/interface/task_commit?callback=ret_task&uid=139154715&cid=&gcid=&size=3517912090&goldbean=0&silverbean=0&t=Flight.of.the.Navigator.1986.720p.BluRay.X264-7SinS.mkv&url=ed2k%3A%2F%2F%7Cfile%7CFlight.of.the.Navigator.1986.720p.BluRay.X264-7SinS.mkv%7C3517912090%7CD7ABA3230E00007C9887A40106838614%7Ch%3DH7GB4TSG5KJ7RTBZN7MU5H7XX5KQSHQ3%7C%2F&type=2&o_page=history&o_taskid=0&class_id=0&database=undefined&interfrom=task&time=Wed%20Jul%2010%202013%2016:25:20%20GMT+0800%20(CST)&noCacheIE=1373444720566
+        $url = 'http://dynamic.cloud.vip.xunlei.com/interface/task_commit?callback=ret_task';
+        $url .= '&uid=' . $this->cookie_store['userid'];
+        $url .= '&cid=' . $task_info['cid'];
+        $url .= '&gcid=' . $task_info['gcid'];
+        $url .= '&size=' . $task_info['fsize'];
+        $url .= '&goldbean=0&silverbean=0';
+        $url .= '&t=' . urlencode($task_info['tname']);
+        $url .= '&url=' . urlencode($in_url);
+        $url .= '&type=0&o_page=history&o_taskid=0&class_id=0&database=undefined&interfrom=task';
+        $url .= '&time='.urlencode(strftime('%c'));
+        $url .= '&noCacheIE=';
+
+        $s = $this->http_get($url);
+
+        $fake_json = str_replace(
+            array('ret_task(', 'new Array(', '\')', '\''),
+            array('[', '[', '\']', '"'),
+            $s
+        );
+        $j = json_decode($fake_json, true);
+        if ($j[0] == 0 || $j[0] == 75) {
+            throw new SPException('failed to add default task');
+        }
+        $task_id = $j[1];
+        $this->log('task_commit: output=' . $s);
+
+        $j = $this->getTasks(1, 20);
+        foreach ($j['info']['tasks'] as $task) {
+            if ($task['id'] === $task_id) {
+                break;
+            }
+        }
+
+        if ($task['download_status'] != 2) {
+            throw new SPException('download not finished');
+        }
+        $this->log('task add: tid=' . $task_id . ' infohash=' . $task['cid']);
+
+        $url = $task['lixian_url'];
+        $cookie = 'gdriveid=' . $j['info']['user']['cookie'];
+        $title = $task_info['tname'];
 
         $this->getDownloader()->download(
             $url,
@@ -486,6 +641,7 @@ class spXunleiConfig
 
     public $cookie_file;
     public $download_dir;
+    public $log_file;
 
     public $downloader;
 
@@ -501,6 +657,8 @@ class spXunleiConfig
 
             $this->cookie_file = $configArray['global']['cookie_file'];
             $this->download_dir = $configArray['global']['download_dir'];
+
+            $this->log_file = $configArray['global']['log_file'];
 
             $this->downloader = $configArray['downloader']['engine'];
 
