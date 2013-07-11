@@ -647,6 +647,8 @@ class spXunleiConfig
 
     public $downloader_config = array();
 
+    public $webui = array();
+
     public function __construct($ini_file='')
     {
         if (!empty($ini_file)) {
@@ -668,6 +670,8 @@ class spXunleiConfig
             if (!isset($this->downloader_config['download_dir'])) {
                 $this->downloader_config['download_dir'] = $this->download_dir;
             }
+
+            $this->webui = $configArray['webui'];
         }
     }
 }
