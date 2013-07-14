@@ -1,7 +1,7 @@
 <?php
-require(__DIR__ . '/../classes/spXunlei.php');
+require(dirname(__FILE__) . '/../classes/spXunlei.php');
 
-$config = new spXunleiConfig(__DIR__ . '/../config/sskaje.ini');
+$config = new spXunleiConfig(dirname(__FILE__) . '/../config/sskaje.ini');
 $xunlei = new spXunlei($config);
 $xunlei->login();
 #$xunlei->addMagnet('magnet:?xt=urn:btih:AB4AE6CA7CE081291E41DEB2A28ECD49BA827A24&dn=under+the+dome+s01e03+720p+hdtv+x264+dimension+eztv&tr=udp%3A%2F%2Ffr33domtracker.h33t.com%3A3310%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337');

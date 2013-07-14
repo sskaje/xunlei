@@ -4,6 +4,9 @@
  *
  * @author sskaje http://sskaje.me/
  */
+
+define('SPXL_CLASSROOT', defined('__DIR__') ? __DIR__ : dirname(__FILE__));
+
 class spXunlei
 {
 
@@ -17,6 +20,13 @@ class spXunlei
     public function isLoggedIn()
     {
         $this->http_get('http://dynamic.cloud.vip.xunlei.com/login?from=0', array(CURLOPT_FOLLOWLOCATION=>0));
+
+        if ($this->http_code == '302' && strpos($this->redirect_url, 'user_task') !== false) {
+            return true;
+        } else {
+            return false;
+        }
+
         # check and compare
         $info = $this->http_info();
         if ($info['http_code'] == '302' && strpos($info['redirect_url'], 'user_task') !== false) {
@@ -84,6 +94,8 @@ class spXunlei
         if (php_sapi_name() == 'cli') {
             # write to stderr
             fwrite(STDERR, "{$message}\n");
+        } else {
+            echo "{$message}<br />\n";
         }
 
         error_log($message, 3, $this->config->log_file);
@@ -515,7 +527,8 @@ class spXunlei
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 0);
             curl_setopt($ch, CURLOPT_VERBOSE, 0);
-            curl_setopt($ch, CURLOPT_HEADER, 1);
+            curl_setopt($ch, CURLOPT_HEADER, false);
+            curl_setopt($ch, CURLOPT_HEADERFUNCTION, array($this, 'curlProcessHeaders'));
             curl_setopt($ch, CURLOPT_COOKIEJAR, $this->config->cookie_file);
             curl_setopt($ch, CURLOPT_COOKIEFILE, $this->config->cookie_file);
 
@@ -592,6 +605,44 @@ class spXunlei
      */
     protected $cookie_store = array();
 
+    protected $redirect_url = '';
+
+    protected $http_code = '';
+
+    protected function curlResetProcessedHeaders()
+    {
+        $this->redirect_url = '';
+        $this->http_code = '';
+    }
+
+    /**
+     * Process headers
+     * 
+     * @param resource $curl
+     * @param string $header
+     */
+    protected function curlProcessHeaders($curl, $header)
+    {
+        if (0 === strpos($header, 'HTTP/')) {
+            list(, $this->http_code, ) = explode(' ', $header, 3);
+        }
+
+        if (0 === stripos($header, 'Set-Cookie')) {
+            $t = explode('=', substr($header, strlen('Set-Cookie: '), strpos($header, '; ')-strlen('Set-Cookie: ')), 2);
+
+            $this->cookie_store[$t[0]] = $t[1];
+        }
+
+        # save location: url
+        # TODO: url host ?
+        if (0 === stripos($header, 'location')) {
+            list(, $this->redirect_url) = explode(':', $header, 2);
+            $this->redirect_url = trim($this->redirect_url);
+        }
+
+        return strlen($header);
+    }
+
     /**
      * execute http request
      *
@@ -600,20 +651,9 @@ class spXunlei
     protected function http_exec()
     {
         $ch = $this->http_init();
+        $this->curlResetProcessedHeaders();
         $result = curl_exec($ch);
-
-        list($header, $content) = explode("\r\n\r\n", $result, 2);
-        $header_array = explode("\r\n", $header);
-
-        foreach ($header_array as $row) {
-            if (0 === stripos($row, 'Set-Cookie')) {
-                $t = explode('=', substr($row, strlen('Set-Cookie: '), strpos($row, '; ')-strlen('Set-Cookie: ')), 2);
-
-                $this->cookie_store[$t[0]] = $t[1];
-            }
-        }
-
-        return $content;
+        return $result;
     }
 
     /**
@@ -700,7 +740,7 @@ abstract class spXunleiDownloader
 
             $class = 'spXunleiDownloader_' . $engine;
             if (!class_exists($class)) {
-                $file = __DIR__ . '/downloader/' . $engine . '.php';
+                $file = SPXL_CLASSROOT . '/downloader/' . $engine . '.php';
                 if (!is_file($file)) {
                     throw new SPException('Engine '.$engine.' not found');
                 }
@@ -735,6 +775,6 @@ if (!class_exists('SPException')) {
 /**
  * import json-rpc client
  */
-require(__DIR__ . '/spJsonRPC.php');
+require(SPXL_CLASSROOT . '/spJsonRPC.php');
 
 # EOF

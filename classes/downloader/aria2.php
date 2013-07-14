@@ -44,7 +44,7 @@ class spXunleiDownloader_aria2 extends spXunleiDownloader
             'header'    =>  'Cookie: ' . $options['cookie']
         );
 
-        $this->checkMkdir($options['filename']);
+        # $this->checkMkdir($options['filename']);
 
         $rpcopts['dir'] = $this->download_dir;
         $rpcopts['out'] = $options['infohash'] . '/' .$options['filename'];

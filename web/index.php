@@ -4,8 +4,11 @@
  *
  * @author sskaje
  */
-require(__DIR__ . '/../classes/spXunlei.php');
-$config = new spXunleiConfig(__DIR__ . '/../config/sskaje.ini');
+header('Content-type: text/html; charset=utf-8');
+date_default_timezone_set('Asia/Shanghai');
+
+require(dirname(__FILE__) . '/../classes/spXunlei.php');
+$config = new spXunleiConfig(dirname(__FILE__) . '/../config/sskaje.ini');
 
 if ($config->webui['auth']) {
     if (!isset($_SERVER['PHP_AUTH_USER']) || $_SERVER['PHP_AUTH_USER'] !== $config->webui['auth_user'] ||
@@ -18,15 +21,36 @@ if ($config->webui['auth']) {
     }
 }
 
-
-
+?>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Xunlei Lixian Remote Downloader Web UI</title>
+    <style type="text/css">
+        .url_input {width:240px;}
+    </style>
+</head>
+<body>
+<h1>Xunlei Lixian Remote Downloader</h1>
+<h3>Author: sskaje (<a href="http://sskaje.me/">http://sskaje.me/</a>)</h3>
+<form action="" method="post">
+    URL: <input type="text" name="urls[]" value="" class="url_input" placeholder="URL..." /><br />
+    URL: <input type="text" name="urls[]" value="" class="url_input" placeholder="URL..." /><br />
+    <!-- [+] <br /> -->
+    <label><input type="checkbox" name="bt_download_all" value="1" />Download All Files in Torrent/Magnet?</label><br />
+    <input type="submit" name="" value="Add task" />
+</form>
+<?php
 if (isset($_POST['urls'])) {
-    # TODO: multi-task support
     $urls = (array) $_POST['urls'];
 
-
     $xunlei = new spXunlei($config);
-    $xunlei->login();
+    try {
+        $xunlei->login();
+    } catch (Exception $e) {
+        $xunlei->logException($e);
+        exit;
+    }
 
     # process options
     $options = array();
@@ -35,23 +59,14 @@ if (isset($_POST['urls'])) {
     }
 
     foreach ($urls as $url) {
+        if (empty($url)) {
+            continue;
+        }
         $xunlei->addTask($url, $options);
     }
 }
 
 ?>
-<html>
-<head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    <title>Xunlei Lixian Remote Downloader Web UI</title>
-</head>
-<body>
-    <form action="" method="post">
-        URL: <input type="text" name="urls[]" value="" placeholder="URL..." /><br />
-        URL: <input type="text" name="urls[]" value="" placeholder="URL..." /><br />
-        <label><input type="checkbox" name="bt_download_all" value="1" />Download All Files in Torrent/Magnet?</label><br />
-        <input type="submit" name="" value="Add taskit" />
-    </form>
 
 </body>
 </html>
