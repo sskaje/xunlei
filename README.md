@@ -4,4 +4,5 @@
 
 Author: sskaje ([http://sskaje.me/](http://sskaje.me/))
 
-
+##配置说明
+[https://sskaje.me/index.php/2013/07/xunlei/](https://sskaje.me/index.php/2013/07/xunlei/)

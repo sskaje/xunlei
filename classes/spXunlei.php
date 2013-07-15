@@ -26,16 +26,13 @@ class spXunlei
         } else {
             return false;
         }
-
-        # check and compare
-        $info = $this->http_info();
-        if ($info['http_code'] == '302' && strpos($info['redirect_url'], 'user_task') !== false) {
-            return true;
-        } else {
-            return false;
-        }
     }
-    
+
+    /**
+     * 登录
+     *
+     * @throws SPException
+     */
     public function login()
     {
         $login_count = 0;
@@ -70,6 +67,7 @@ class spXunlei
 
                 $ch = $this->http_init();
                 curl_setopt($ch, CURLOPT_COOKIE, 'gdriveid=' . $gdriveid . '; path=/; domain=.xunlei.com');
+                $this->cookie_store['gdriveid'] = $gdriveid;
                 return $gdriveid;
             }
 
@@ -130,7 +128,12 @@ class spXunlei
                 strpos($url, 'mms://') === 0 ||
                 strpos($url, 'rtsp://') === 0
             ){
-                $this->addDefault($url, $options);
+                # 简单处理远程torrent文件
+                if (preg_match('#\.torrent$#i', $url)) {
+                    $this->addTorrent($url);
+                } else {
+                    $this->addDefault($url, $options);
+                }
             } else {
                 throw new SPException('URL not supported yet');
             }
@@ -163,7 +166,7 @@ class spXunlei
 
         $this->log('Query task url: '  . "\tfilelist:");
         foreach ($j[5] as $k=>$file) {
-            $this->log('Query task url:' . "\t".($j[8][$k] ? '+' : '')."\t{$file} [{$j[6][$k]}]" );
+            $this->log('Query task url:' . "\t".($j[8][$k] ? '+' : '-')."\t{$file} [{$j[6][$k]}]" );
         }
 
         return array(
@@ -181,6 +184,58 @@ class spXunlei
             'random'        =>  $j[11],
             'rtcode'        =>  $j[12],
         );
+    }
+
+    /**
+     * 添加远程torrent文件，并自动切换成bt下载
+     *
+     * @param string $torrent
+     * @param array $options
+     * @throws SPException
+     */
+    public function addTorrent($torrent, $options=array())
+    {
+        if (stripos($torrent, 'http') !== 0 || !preg_match('#\.torrent$#i', $torrent)) {
+            throw new SPException('Currently only support torrent url end with .torrent');
+        }
+
+        $task_info = $this->queryTaskUrl($torrent);
+
+        $gdriveid = $this->getGDriveID();
+        $this->log('gdriveid=' . $gdriveid);
+
+        $url = 'http://dynamic.cloud.vip.xunlei.com/interface/bt_task_commit?callback=jsonp1373350685430&t='.urlencode(strftime('%c')); #.'Tue%20Jul%2009%202013%2014:30:48%20GMT+0800%20(CST)';
+        $post = 'uid=' . $this->cookie_store['userid'];
+        $post .= '&btname=' . urlencode($task_info['bt_title']);
+        $post .= '&cid=' . $task_info['infohash'];
+        $post .= '&goldbean=0&silverbean=0';
+        $post .= '&tsize=' . $task_info['fsize'];
+        # findex=0_&size=296075521_
+
+        # valid_list
+        if (isset($options['bt_download_all'])) {
+            $findex = implode('_', $task_info['findex']) . '_';
+            $check = count($task_info['findex']);
+            $this->log('Torrent: download all files');
+        } else {
+            $findex = '';
+            $this->log('Torrent: download valid files');
+            $check = 0;
+            foreach ($task_info['valid_list'] as $k=>$v) {
+                if ($v == 0) continue;
+                ++$check;
+                $findex .= $task_info['findex'][$k] . '_';
+
+                $this->log('Torrent:' . "\t\t{$task_info['subtitle'][$k]} [{$task_info['subformatsize'][$k]}]" );
+            }
+        }
+        $post .= '&check='  . $check;
+        $post .= '&findex=' . $findex;
+        $post .= '&class_id=0';
+
+        $s = $this->http_post($url, $post);
+
+        $this->log('bt_task_commit: ' . $s);
     }
 
     /**
@@ -219,7 +274,7 @@ class spXunlei
 
         # valid_list
         if (isset($options['bt_download_all'])) {
-            $findex = implode('_', array_keys($task_info['size_list'])) . '_';
+            $findex = implode('_', $task_info['findex']) . '_';
             $size = implode('_', $task_info['size_list']) . '_';
             $this->log('Magnet: download all files');
         } else {
@@ -228,7 +283,7 @@ class spXunlei
             $this->log('Magnet: download valid files');
             foreach ($task_info['valid_list'] as $k=>$v) {
                 if ($v == 0) continue;
-                $findex .= $k . '_';
+                $findex .= $task_info['findex'][$k] . '_';
                 $size .= $task_info['size_list'] . '_';
 
                 $this->log('Magnet:' . "\t\t{$task_info['subtitle'][$k]} [{$task_info['subformatsize'][$k]}]" );
