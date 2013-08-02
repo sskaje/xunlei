@@ -304,39 +304,49 @@ class spXunlei
         $m = array();
         preg_match('#"id":"(\d+)"#', $s, $m);
 
-        $url = 'http://dynamic.cloud.vip.xunlei.com/interface/fill_bt_list?callback=fill_bt_list';
-        $url .= '&tid=' . $m[1];
-        $url .= '&infoid=' . $task_info['infohash'];
-        $url .= '&g_net=1&p=1';
-        $url .= '&uid=' . $this->cookie_store['userid'];
-        $url .= '&interfrom=task&noCacheIE=';
+        $page = 0;
 
-        $s = $this->http_get($url);
-        $this->log('fill_bt_list: tid=' . $m[1] . ', infohash=' . $task_info['infohash']);
+        do {
+            ++$page;
+            $url = 'http://dynamic.cloud.vip.xunlei.com/interface/fill_bt_list?callback=fill_bt_list';
+            $url .= '&tid=' . $m[1];
+            $url .= '&infoid=' . $task_info['infohash'];
+            $url .= '&g_net=1&p=' . $page;
+            $url .= '&uid=' . $this->cookie_store['userid'];
+            $url .= '&interfrom=task&noCacheIE=';
 
-        $json = substr($s, strlen('fill_bt_list('), -1);
-        $j = json_decode($json, true);
+            $s = $this->http_get($url);
+            $this->log('fill_bt_list: tid=' . $m[1] . ', infohash=' . $task_info['infohash']);
 
-        $cookie = 'gdriveid=' . $gdriveid;
-        # send task:
-        foreach ($j['Result']['Record'] as $file) {
-            if ($file['download_status'] != 2 || empty($file['downurl'])) {
-                $this->log('Magnet: file not available yet. title='.$file['title']);
-                continue;
+            $json = substr($s, strlen('fill_bt_list('), -1);
+            $j = json_decode($json, true);
+            if (!$j || empty($j['Result']['Record'])) {
+                $this->log('fill_bt_list: No file found, something went wrong?');
+                return ;
             }
 
-            $url = $file['downurl'];
-            $title = $file['title'];
+            $cookie = 'gdriveid=' . $gdriveid;
+            # send task:
+            foreach ($j['Result']['Record'] as $file) {
+                if ($file['download_status'] != 2 || empty($file['downurl'])) {
+                    $this->log('Magnet: file not available yet. title='.$file['title']);
+                    continue;
+                }
 
-            $this->getDownloader()->download(
-                $url,
-                array(
-                    'infohash'  =>  $j['Result']['Infoid'],
-                    'cookie'    =>  $cookie,
-                    'filename'  =>  $title,
-                )
-            );
-        }
+                $url = $file['downurl'];
+                $title = $file['title'];
+
+                $this->getDownloader()->download(
+                    $url,
+                    array(
+                        'infohash'  =>  $j['Result']['Infoid'],
+                        'cookie'    =>  $cookie,
+                        'filename'  =>  $title,
+                    )
+                );
+            }
+
+        } while (ceil($j['Result']['btnum'] / $j['Result']['btpernum']) > $page);
     }
 
     public function queryTaskCid($url)

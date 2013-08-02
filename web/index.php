@@ -27,23 +27,19 @@ if ($config->webui['auth']) {
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <title>Xunlei Lixian Remote Downloader Web UI</title>
     <style type="text/css">
-        .url_input {width:240px;}
+        .url_text {width:480px; height: 300px}
     </style>
 </head>
 <body>
 <h1>Xunlei Lixian Remote Downloader</h1>
 <h3>Author: sskaje (<a href="http://sskaje.me/">http://sskaje.me/</a>)</h3>
 <form action="" method="post">
-    URL: <input type="text" name="urls[]" value="" class="url_input" placeholder="URL..." /><br />
-    URL: <input type="text" name="urls[]" value="" class="url_input" placeholder="URL..." /><br />
-    <!-- [+] <br /> -->
+    URL: <textarea name="urls" placeholder="URL..." class="url_text"></textarea><br />
     <label><input type="checkbox" name="bt_download_all" value="1" />Download All Files in Torrent/Magnet?</label><br />
     <input type="submit" name="" value="Add task" />
 </form>
 <?php
 if (isset($_POST['urls'])) {
-    $urls = (array) $_POST['urls'];
-
     $xunlei = new spXunlei($config);
     try {
         $xunlei->login();
@@ -58,15 +54,16 @@ if (isset($_POST['urls'])) {
         $options['bt_download_all'] = true;
     }
 
+    $urls = preg_split('#[\r\n]#', $_POST['urls'], -1, PREG_SPLIT_NO_EMPTY);
+
     foreach ($urls as $url) {
+        $url = trim($url);
         if (empty($url)) {
             continue;
         }
         $xunlei->addTask($url, $options);
     }
 }
-
 ?>
-
 </body>
 </html>

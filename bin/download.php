@@ -58,7 +58,7 @@ USAGE: {$argv[0]} [options] LINK ...
     Options:
         -a, --bt-download-all               download all files in magnet or files recommended by xunlei
         -c, --config                        ini config file
-        -h, --help                          show this menu
+        -h, --help                          display this menu
 
 USAGE;
     exit;
