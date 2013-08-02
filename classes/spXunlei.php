@@ -346,7 +346,7 @@ class spXunlei
                 );
             }
 
-        } while (ceil($j['Result']['btnum'] / $j['Result']['btpernum']) > $page);
+        } while (ceil($j['Result']['btnum'] / $j['Result']['btpernum']) >= $page);
     }
 
     public function queryTaskCid($url)
