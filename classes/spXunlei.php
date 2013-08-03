@@ -203,8 +203,8 @@ class spXunlei
 
         $gdriveid = $this->getGDriveID();
         $this->log('gdriveid=' . $gdriveid);
-
-        $url = 'http://dynamic.cloud.vip.xunlei.com/interface/bt_task_commit?callback=jsonp1373350685430&t='.urlencode(strftime('%c')); #.'Tue%20Jul%2009%202013%2014:30:48%20GMT+0800%20(CST)';
+        $jsonp = $this->jsonpName('jsonp');
+        $url = 'http://dynamic.cloud.vip.xunlei.com/interface/bt_task_commit?callback='.$jsonp.'&t='.urlencode(strftime('%c')); #.'Tue%20Jul%2009%202013%2014:30:48%20GMT+0800%20(CST)';
         $post = 'uid=' . $this->cookie_store['userid'];
         $post .= '&btname=' . urlencode($task_info['bt_title']);
         $post .= '&cid=' . $task_info['infohash'];
@@ -264,7 +264,8 @@ class spXunlei
         $gdriveid = $this->getGDriveID();
         $this->log('gdriveid=' . $gdriveid);
 
-        $url = 'http://dynamic.cloud.vip.xunlei.com/interface/bt_task_commit?callback=jsonp1373350685430&t='.urlencode(strftime('%c')); #.'Tue%20Jul%2009%202013%2014:30:48%20GMT+0800%20(CST)';
+        $jsonp = $this->jsonpName('jsonp');
+        $url = 'http://dynamic.cloud.vip.xunlei.com/interface/bt_task_commit?callback='.$jsonp.'&t='.urlencode(strftime('%c')); #.'Tue%20Jul%2009%202013%2014:30:48%20GMT+0800%20(CST)';
         $post = 'uid=' . $this->cookie_store['userid'];
         $post .= '&btname=' . urlencode($task_info['bt_title']);
         $post .= '&cid=' . $task_info['infohash'];
@@ -364,7 +365,6 @@ class spXunlei
             $s
         );
 
-        # var_dump($s, $fake_json, json_decode($fake_json));
         $j = json_decode($fake_json, true);
 
         return array(
@@ -429,11 +429,26 @@ class spXunlei
         $task_id = $j[1];
         $this->log('task_commit: output=' . $s);
 
-        $j = $this->getTasks(1, 20);
-        foreach ($j['info']['tasks'] as $task) {
-            if ($task['id'] === $task_id) {
-                break;
+        $flag_found_task = false;
+        $pagesize = 20;
+        do {
+            $this->log("Find task in latest {$pagesize}");
+            $j = $this->getTasks(1, $pagesize);
+
+            if (is_array($j) && isset($j['info']['tasks'])) {
+                foreach ($j['info']['tasks'] as $task) {
+                    if ($task['id'] === $task_id) {
+                        $flag_found_task = true;
+                        $this->log('task found: task_id='.$task['id']);
+                        break;
+                    }
+                }
             }
+            $pagesize += 20;
+        } while (!$flag_found_task && $pagesize <= 60);
+
+        if (!$flag_found_task) {
+            throw new SPException('task add: task not found');
         }
 
         if ($task['download_status'] != 2) {
@@ -491,11 +506,26 @@ class spXunlei
         $task_id = $j[1];
         $this->log('task_commit: output=' . $s);
 
-        $j = $this->getTasks(1, 20);
-        foreach ($j['info']['tasks'] as $task) {
-            if ($task['id'] === $task_id) {
-                break;
+        $flag_found_task = false;
+        $pagesize = 20;
+        do {
+            $this->log("Find task in latest {$pagesize}");
+            $j = $this->getTasks(1, $pagesize);
+
+            if (is_array($j) && isset($j['info']['tasks'])) {
+                foreach ($j['info']['tasks'] as $task) {
+                    if ($task['id'] === $task_id) {
+                        $flag_found_task = true;
+                        $this->log('task found: task_id='.$task['id']);
+                        break;
+                    }
+                }
             }
+            $pagesize += 20;
+        } while (!$flag_found_task && $pagesize <= 60);
+
+        if (!$flag_found_task) {
+            throw new SPException('task add: task not found');
         }
 
         if ($task['download_status'] != 2) {
@@ -544,6 +574,17 @@ class spXunlei
     );
 
     /**
+     * Random JSONP argument
+     *
+     * @param string $prefix
+     * @return string
+     */
+    protected function jsonpName($prefix)
+    {
+        return $prefix . (microtime(1) * 1000000);
+    }
+
+    /**
      * Get task list
      *
      * @param int $page
@@ -553,8 +594,9 @@ class spXunlei
     public function getTasks($page, $pagesize)
     {
         #type_id: 4 全部, 1 正在下载, 2 已下载, 13 已过期, 11 已删除
+        $jsonp = $this->jsonpName('jsonp');
 
-        $url = 'http://dynamic.cloud.vip.xunlei.com/interface/showtask_unfresh?callback=jsonp1373444612562&t=' . urlencode(strftime('%c'));;
+        $url = 'http://dynamic.cloud.vip.xunlei.com/interface/showtask_unfresh?callback='.$jsonp.'&t=' . urlencode(strftime('%c'));;
         $url .= '&type_id=4';
         $url .= '&page='.$page;
         $url .= '&tasknum=' . $pagesize;
@@ -562,7 +604,7 @@ class spXunlei
         $url .= '&interfrom=task';
 
         $s = $this->http_get($url);
-        $json = substr($s, strlen('jsonp1373444612562('), -1);
+        $json = substr($s, strlen($jsonp.'('), -1);
         $j = json_decode($json, true);
 
         return $j;
