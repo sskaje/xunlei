@@ -14,7 +14,7 @@ class spJsonRPC
     public function __construct($url, $options=array())
     {
         if (!extension_loaded('curl')) {
-            throw new Exception('php_curl required');
+            throw new SPException_JSONRPC('php_curl required');
         }
 
         $this->url = $url;
@@ -59,20 +59,20 @@ class spJsonRPC
             'id'      => $currentId
         )));
         if (empty($response)) {
-            throw new SPException('Server no response');
+            throw new SPException_JSONRPC('Server no response');
         }
         $response = json_decode($response,true);
 
         if (!isset($response['jsonrpc']) || $response['jsonrpc'] != '2.0') {
-            throw new SPException('Wrong version');
+            throw new SPException_JSONRPC('Wrong version');
         }
         #
         if ($response['id'] !== $currentId) {
-            throw new SPException('Id mismatch (request:'.$currentId.'; response: '.$response['id'].')');
+            throw new SPException_JSONRPC('Id mismatch (request:'.$currentId.'; response: '.$response['id'].')');
         }
 
         if (isset($response['error'])) {
-            throw new SPException('Request error: ' . $response['error']['message'] . '#' . $response['error']['code']);
+            throw new SPException_JSONRPC('Request error: ' . $response['error']['message'] . '#' . $response['error']['code']);
         }
 
         return $response['result'];
@@ -120,5 +120,7 @@ if (!class_exists('SPException')) {
      */
     class SPException extends Exception{}
 }
+
+class SPException_JSONRPC extends SPException{}
 
 # EOF

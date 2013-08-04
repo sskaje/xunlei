@@ -38,7 +38,7 @@ class spXunlei
         $login_count = 0;
         while (!$this->isLoggedIn()) {
             if ($login_count++ > 5) {
-                throw new SPException('Login failed');
+                throw new SPException_Xunlei('Login failed');
             }
 
             $url_login_check = 'http://login.xunlei.com/check?u='.urlencode($this->config->username).'&cachetime=' . time();
@@ -135,7 +135,7 @@ class spXunlei
                     $this->addDefault($url, $options);
                 }
             } else {
-                throw new SPException('URL not supported yet');
+                throw new SPException_Xunlei('URL not supported yet');
             }
             return true;
         } catch (Exception $e) {
@@ -158,7 +158,7 @@ class spXunlei
         );
         $j = json_decode($fake_json, true);
         if (!$j) {
-            throw new SPException('Query task url: failed, invalid json?');
+            throw new SPException_Xunlei('Query task url: failed, invalid json?');
         }
         $this->log('Query task url: '  . "\tinfohash={$j[1]}");
         $this->log('Query task url: '  . "\tfsize={$j[2]}");
@@ -196,7 +196,7 @@ class spXunlei
     public function addTorrent($torrent, $options=array())
     {
         if (stripos($torrent, 'http') !== 0 || !preg_match('#\.torrent$#i', $torrent)) {
-            throw new SPException('Currently only support torrent url end with .torrent');
+            throw new SPException_Xunlei('Currently only support torrent url end with .torrent');
         }
 
         $task_info = $this->queryTaskUrl($torrent);
@@ -249,7 +249,7 @@ class spXunlei
     public function addMagnet($magnet, $options=array())
     {
         if (strpos($magnet, 'magnet:') !== 0) {
-            throw new SPException('invalid magnet url');
+            throw new SPException_Xunlei('invalid magnet url');
         }
 
         # query task url
@@ -300,7 +300,7 @@ class spXunlei
         $this->log('bt_task_commit: ' . $s);
 
         if (strpos($s, '"progress":1') === false) {
-            throw new SPException('Not yet downloaded');
+            throw new SPException_Xunlei('Not yet downloaded');
         }
         $m = array();
         preg_match('#"id":"(\d+)"#', $s, $m);
@@ -393,7 +393,7 @@ class spXunlei
     {
         # ed2k://|file|Flight.of.the.Navigator.1986.720p.BluRay.X264-7SinS.mkv|3517912090|D7ABA3230E00007C9887A40106838614|h=H7GB4TSG5KJ7RTBZN7MU5H7XX5KQSHQ3|/
         if (strpos($ed2k, 'ed2k://|file|') !== 0) {
-            throw new SPException('Invalid ed2k url');
+            throw new SPException_Xunlei('Invalid ed2k url');
         }
         $str = substr(trim($ed2k), strlen('ed2k://|file|'));
         list($filename, $size, $hash, ) = explode('|', $str, 4);
@@ -424,7 +424,7 @@ class spXunlei
         );
         $j = json_decode($fake_json, true);
         if ($j[0] == 0 || $j[0] == 75) {
-            throw new SPException('failed to add ed2k task');
+            throw new SPException_Xunlei('failed to add ed2k task');
         }
         $task_id = $j[1];
         $this->log('task_commit: output=' . $s);
@@ -448,11 +448,11 @@ class spXunlei
         } while (!$flag_found_task && $pagesize <= 60);
 
         if (!$flag_found_task) {
-            throw new SPException('task add: task not found');
+            throw new SPException_Xunlei('task add: task not found');
         }
 
         if ($task['download_status'] != 2) {
-            throw new SPException('download not finished');
+            throw new SPException_Xunlei('download not finished');
         }
         $this->log('task add: tid=' . $task_id . ' infohash=' . $task['cid']);
 
@@ -501,7 +501,7 @@ class spXunlei
         );
         $j = json_decode($fake_json, true);
         if ($j[0] == 0 || $j[0] == 75) {
-            throw new SPException('failed to add default task');
+            throw new SPException_Xunlei('failed to add default task');
         }
         $task_id = $j[1];
         $this->log('task_commit: output=' . $s);
@@ -525,11 +525,11 @@ class spXunlei
         } while (!$flag_found_task && $pagesize <= 60);
 
         if (!$flag_found_task) {
-            throw new SPException('task add: task not found');
+            throw new SPException_Xunlei('task add: task not found');
         }
 
         if ($task['download_status'] != 2) {
-            throw new SPException('download not finished');
+            throw new SPException_Xunlei('download not finished');
         }
         $this->log('task add: tid=' . $task_id . ' infohash=' . $task['cid']);
 
@@ -849,12 +849,12 @@ abstract class spXunleiDownloader
             if (!class_exists($class)) {
                 $file = SPXL_CLASSROOT . '/downloader/' . $engine . '.php';
                 if (!is_file($file)) {
-                    throw new SPException('Engine '.$engine.' not found');
+                    throw new SPException_Xunlei('Engine '.$engine.' not found');
                 }
 
                 require($file);
                 if (!class_exists($class)) {
-                    throw new SPException('Engine '.$engine.' not found');
+                    throw new SPException_Xunlei('Engine '.$engine.' not found');
                 }
             }
 
@@ -877,6 +877,8 @@ if (!class_exists('SPException')) {
      */
     class SPException extends Exception{}
 }
+
+class SPException_Xunlei extends SPException {}
 
 
 /**
