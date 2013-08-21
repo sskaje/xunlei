@@ -63,12 +63,7 @@ class spXunlei
             $j = $this->getTasks(1, 1);
 
             if (isset($j['info']['user']['cookie'])) {
-                $gdriveid = $j['info']['user']['cookie'];
-
-                $ch = $this->http_init();
-                curl_setopt($ch, CURLOPT_COOKIE, 'gdriveid=' . $gdriveid . '; path=/; domain=.xunlei.com');
-                $this->cookie_store['gdriveid'] = $gdriveid;
-                return $gdriveid;
+                return $j['info']['user']['cookie'];
             }
 
             return false;
@@ -96,7 +91,7 @@ class spXunlei
             echo "{$message}<br />\n";
         }
 
-        error_log($message, 3, $this->config->log_file);
+        error_log($message . "\n", 3, $this->config->log_file);
     }
 
     public function logException($e)
@@ -115,6 +110,14 @@ class spXunlei
     {
         $this->log("Add task: " . $url);
         try {
+
+            foreach($this->config->plugin as $k=>$v) {
+                $pluginObj = spXunleiPlugin::Create($this, $k, $v);
+                if ($pluginObj->match($url) && $pluginObj->process($url, $options)) {
+                    return true;
+                }
+            }
+
             if (strpos($url, 'magnet:') === 0) {
                 $this->addMagnet($url, $options);
             } else if (strpos($url, 'ed2k://|file') === 0) {
@@ -326,7 +329,6 @@ class spXunlei
                 return ;
             }
 
-            $cookie = 'gdriveid=' . $gdriveid;
             # send task:
             foreach ($j['Result']['Record'] as $file) {
                 if ($file['download_status'] != 2 || empty($file['downurl'])) {
@@ -337,17 +339,35 @@ class spXunlei
                 $url = $file['downurl'];
                 $title = $file['title'];
 
-                $this->getDownloader()->download(
+                $this->addDownloadTask(
                     $url,
-                    array(
-                        'infohash'  =>  $j['Result']['Infoid'],
-                        'cookie'    =>  $cookie,
-                        'filename'  =>  $title,
-                    )
+                    $j['Result']['Infoid'],
+                    $title
                 );
             }
 
         } while (ceil($j['Result']['btnum'] / $j['Result']['btpernum']) >= $page);
+    }
+
+    public function addDownloadTask($url, $infohash, $filename)
+    {
+        if (!isset($this->cookie_store['gdriveid'])) {
+            $gdriveid = $this->getGDriveID();
+        } else {
+            $gdriveid = $this->cookie_store['gdriveid'];
+        }
+
+        $cookie = 'gdriveid=' . $gdriveid;
+
+        $this->getDownloader()->download(
+            $url,
+            array(
+                'infohash'  =>  $infohash,
+                'cookie'    =>  $cookie,
+                'filename'  =>  $filename,
+            )
+        );
+
     }
 
     public function queryTaskCid($url)
@@ -457,16 +477,12 @@ class spXunlei
         $this->log('task add: tid=' . $task_id . ' infohash=' . $task['cid']);
 
         $url = $task['lixian_url'];
-        $cookie = 'gdriveid=' . $j['info']['user']['cookie'];
         $title = $filename;
 
-        $this->getDownloader()->download(
+        $this->addDownloadTask(
             $url,
-            array(
-                'infohash'  =>  $task['cid'],
-                'cookie'    =>  $cookie,
-                'filename'  =>  $title,
-            )
+            $task['cid'],
+            $title
         );
     }
 
@@ -534,16 +550,13 @@ class spXunlei
         $this->log('task add: tid=' . $task_id . ' infohash=' . $task['cid']);
 
         $url = $task['lixian_url'];
-        $cookie = 'gdriveid=' . $j['info']['user']['cookie'];
+
         $title = $task_info['tname'];
 
-        $this->getDownloader()->download(
+        $this->addDownloadTask(
             $url,
-            array(
-                'infohash'  =>  $task['cid'],
-                'cookie'    =>  $cookie,
-                'filename'  =>  $title,
-            )
+            $task['cid'],
+            $title
         );
     }
 
@@ -607,6 +620,15 @@ class spXunlei
         $json = substr($s, strlen($jsonp.'('), -1);
         $j = json_decode($json, true);
 
+        # save gdriveid
+        if (isset($j['info']['user']['cookie']) && !isset($this->cookie_store['gdriveid'])) {
+            $gdriveid = $j['info']['user']['cookie'];
+
+            $ch = $this->http_init();
+            curl_setopt($ch, CURLOPT_COOKIE, 'gdriveid=' . $gdriveid . '; path=/; domain=.xunlei.com');
+            $this->cookie_store['gdriveid'] = $gdriveid;
+        }
+
         return $j;
     }
 
@@ -638,6 +660,7 @@ class spXunlei
             curl_setopt($ch, CURLOPT_HEADERFUNCTION, array($this, 'curlProcessHeaders'));
             curl_setopt($ch, CURLOPT_COOKIEJAR, $this->config->cookie_file);
             curl_setopt($ch, CURLOPT_COOKIEFILE, $this->config->cookie_file);
+            curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_4) (XunleiLixianDownloader/1.0 sskaje)');
 
             # read cookie file to initialize cookie_store
             if (is_file($this->config->cookie_file)) {
@@ -796,12 +819,14 @@ class spXunleiConfig
 
     public $webui = array();
 
+    public $plugin = array();
+
     public function __construct($ini_file='')
     {
         if (!empty($ini_file)) {
             $configArray = parse_ini_file($ini_file, true);
 
-            $this->username = $configArray['login']['username'];
+            $this->username = $this->parseDefault($configArray['login']['username'], '');
             $this->password = $configArray['login']['password'];
 
             $this->cookie_file = $configArray['global']['cookie_file'];
@@ -818,7 +843,31 @@ class spXunleiConfig
                 $this->downloader_config['download_dir'] = $this->download_dir;
             }
 
-            $this->webui = $configArray['webui'];
+            $this->webui = $this->parseDefault($configArray['webui'], array());
+
+            $plugin_enabled = $this->parseDefault($configArray['plugin']['enable'], 0);
+            if ($plugin_enabled) {
+                $enabled_plugins = $this->parseDefault($configArray['plugin']['list'], '');
+                $plugins = explode(',', $enabled_plugins);
+
+                foreach ($plugins as $p) {
+                    $p = trim($p);
+                    if (!$p) {
+                        continue;
+                    }
+
+                    $this->plugin[$p] = $this->parseDefault($configArray['plugin:' . $p], array());
+                }
+            }
+        }
+    }
+
+    public function parseDefault(&$config, $default)
+    {
+        if (!isset($config)) {
+            return $default;
+        } else {
+            return $config;
         }
     }
 }
@@ -842,31 +891,61 @@ abstract class spXunleiDownloader
      */
     static public function Create($engine, array $config)
     {
-        $key = md5(json_encode($config));
-        if (!isset(self::$objects[$engine][$key])) {
-
-            $class = 'spXunleiDownloader_' . $engine;
-            if (!class_exists($class)) {
-                $file = SPXL_CLASSROOT . '/downloader/' . $engine . '.php';
-                if (!is_file($file)) {
-                    throw new SPException_Xunlei('Engine '.$engine.' not found');
-                }
-
-                require($file);
-                if (!class_exists($class)) {
-                    throw new SPException_Xunlei('Engine '.$engine.' not found');
-                }
+        $class = 'spXunleiDownloader_' . $engine;
+        if (!class_exists($class)) {
+            $file = SPXL_CLASSROOT . '/downloader/' . $engine . '.php';
+            if (!is_file($file)) {
+                throw new SPException_Xunlei('Engine '.$engine.' not found');
             }
 
-            $object = new $class($config);
-            self::$objects[$engine][$key] = $object;
+            require($file);
+            if (!class_exists($class)) {
+                throw new SPException_Xunlei('Engine '.$engine.' not found');
+            }
         }
 
-        return self::$objects[$engine][$key];
+        return new $class($config);
     }
 
     abstract public function __construct($config=array());
     abstract public function download($url, $options=array());
+}
+
+class spXunleiPlugin
+{
+    static protected $objects = array();
+    /**
+     * Create plugin object
+     *
+     * @param string $name
+     * @param array $config
+     * @return ifXunleiPlugin
+     * @throws SPException
+     */
+    static public function Create(spXunlei $xunlei, $name, array $config)
+    {
+        $class = 'spXunleiPlugin_' . $name;
+        if (!class_exists($class)) {
+            $file = SPXL_CLASSROOT . '/plugin/' . $name . '.php';
+            if (!is_file($file)) {
+                throw new SPException_Xunlei('Plugin '.$name.' not found');
+            }
+
+            require($file);
+            if (!class_exists($class)) {
+                throw new SPException_Xunlei('Plugin '.$name.' not found');
+            }
+        }
+
+        return new $class($xunlei, $config);
+    }
+}
+
+interface ifXunleiPlugin
+{
+    public function match($url);
+    public function __construct(spXunlei $xunlei, array $config);
+    public function process($url, $options);
 }
 
 if (!class_exists('SPException')) {
@@ -879,6 +958,7 @@ if (!class_exists('SPException')) {
 }
 
 class SPException_Xunlei extends SPException {}
+
 
 
 /**
