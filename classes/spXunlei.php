@@ -747,7 +747,7 @@ class spXunlei
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 0);
-            curl_setopt($ch, CURLOPT_VERBOSE, 1);
+            curl_setopt($ch, CURLOPT_VERBOSE, 0);
             curl_setopt($ch, CURLOPT_HEADER, false);
             curl_setopt($ch, CURLOPT_HEADERFUNCTION, array($this, 'curlProcessHeaders'));
             curl_setopt($ch, CURLOPT_COOKIEJAR, $this->config->cookie_file);
