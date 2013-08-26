@@ -19,7 +19,17 @@ class spXunlei
 
     public function isLoggedIn()
     {
-        $this->http_get('http://dynamic.cloud.vip.xunlei.com/login?from=0', array(CURLOPT_FOLLOWLOCATION=>0));
+        if (isset($this->cookie_store['blogresult']) && $this->cookie_store['blogresult'] == '0') {
+            return true;
+        }
+
+        $this->http_get(
+            'http://dynamic.cloud.vip.xunlei.com/login?from=0',
+            array(
+                CURLOPT_FOLLOWLOCATION  =>  0,
+                CURLOPT_REFERER =>  'http://lixian.vip.xunlei.com/',
+            )
+        );
 
         if ($this->http_code == '302' && strpos($this->redirect_url, 'user_task') !== false) {
             return true;
@@ -28,27 +38,103 @@ class spXunlei
         }
     }
 
+    protected $loginErrors = array(
+        1   => "验证码错误，请重新输入",
+        2   => "密码错误,请重新输入",
+        3   => "网络超时，请稍候重试",
+        4   => "帐号不存在，请重新输入",
+        5   => "帐号不存在，请重新输入",
+        6   => "帐号被锁定，<a href='http://help.xunlei.com/problemVer.html?serialnum=1045&contentFno=0003000200020001' target='_blank'>详情</a>",
+		7   => "网络超时，请稍候重试",
+        8   => "网络超时，请稍候重试",
+        9   => "非法验证码，请重新登录",
+        10   => "非法验证码",
+        11   => "验证码超时，请稍候重试",
+        12   => "登录页面无效，请重新登录",
+        13   => "登录页面无效，请重新登录",
+        14   => "登录页面无效，请重新登录",
+        15   => "登录页面无效，请重新登录",
+        16   => "网络超时，请重新登录",
+    );
+
     /**
      * 登录
      *
+     * @param string $verify_code 登录验证码
      * @throws SPException
      */
-    public function login()
+    public function login($verify_code='')
     {
+        $retry_max = 5;
+        $verify_code = trim($verify_code);
+        $use_input_verify = false;
+        if (!empty($verify_code)) {
+            $retry_max = 1;
+            $use_input_verify = true;
+            $verify_code = strtoupper($verify_code);
+        }
+
         $login_count = 0;
         while (!$this->isLoggedIn()) {
-            if ($login_count++ > 5) {
-                throw new SPException_Xunlei('Login failed');
-            }
-
-            $url_login_check = 'http://login.xunlei.com/check?u='.urlencode($this->config->username).'&cachetime=' . time();
+            $url_login_check = 'http://login.xunlei.com/check?u='.urlencode($this->config->username).'&cachetime=' . timeInMS();
             $this->http_get($url_login_check);
 
-            list(,$verify_code) = explode(':', $this->cookie_store['check_result']);
+            if ($this->cookie_store['check_result'] == '1') {
+                if (empty($verify_code)) {
+                    throw new SPExceptionXunlei_RequestVerify();
+                }
+
+            } else {
+                list(,$verify_code) = explode(':', $this->cookie_store['check_result']);
+            }
+
             $password = md5(md5(md5($this->config->password)) . strtoupper($verify_code));
             $login_post = 'u='.urlencode($this->config->username).'&p='.$password.'&verifycode='.$verify_code.'&login_enable=1&login_hour=720';
-            $s = $this->http_post('http://login.xunlei.com/sec2login/', $login_post, array(CURLOPT_REFERER=>'http://lixian.vip.xunlei.com/task.html'));
+
+            if ($use_input_verify) {
+                $login_post .= '&business_type=108';
+            }
+
+            $s = $this->http_post(
+                'http://login.xunlei.com/sec2login/',
+                $login_post,
+                array(CURLOPT_REFERER=>'http://lixian.vip.xunlei.com/task.html')
+            );
+
+            if ($this->cookie_store['blogresult']) {
+
+                $error_code = $this->cookie_store['blogresult'];
+                $error_message = $this->loginErrors[$error_code];
+
+                $this->log('Login error: ' . $error_message . '#' . $error_code);
+            } else {
+                # todo?
+                break;
+            }
+
+            if (++$login_count >= $retry_max || (isset($this->cookie_store['blogresult']) && $this->cookie_store['blogresult'])) {
+                throw new SPExceptionXunlei('Login failed');
+            }
+
         }
+    }
+
+    /**
+     * Get Captcha
+     *
+     *
+     * @return mixed
+     */
+    public function getVerifyImage()
+    {
+        # var verifyServer=['http://verify2.xunlei.com/','http://verify.xunlei.com/','http://verify3.xunlei.com/'];
+        $url = 'http://verify.xunlei.com/image?cachetime=' . timeInMS();
+        $content = $this->http_get(
+            $url,
+            array(CURLOPT_REFERER=>'http://lixian.vip.xunlei.com/task.html')
+        );
+
+        return $content;
     }
 
     /**
@@ -138,7 +224,7 @@ class spXunlei
                     $this->addDefault($url, $options);
                 }
             } else {
-                throw new SPException_Xunlei('URL not supported yet');
+                throw new SPExceptionXunlei('URL not supported yet');
             }
             return true;
         } catch (Exception $e) {
@@ -161,7 +247,7 @@ class spXunlei
         );
         $j = json_decode($fake_json, true);
         if (!$j) {
-            throw new SPException_Xunlei('Query task url: failed, invalid json?');
+            throw new SPExceptionXunlei('Query task url: failed, invalid json?');
         }
         $this->log('Query task url: '  . "\tinfohash={$j[1]}");
         $this->log('Query task url: '  . "\tfsize={$j[2]}");
@@ -199,7 +285,7 @@ class spXunlei
     public function addTorrent($torrent, $options=array())
     {
         if (stripos($torrent, 'http') !== 0 || !preg_match('#\.torrent$#i', $torrent)) {
-            throw new SPException_Xunlei('Currently only support torrent url end with .torrent');
+            throw new SPExceptionXunlei('Currently only support torrent url end with .torrent');
         }
 
         $task_info = $this->queryTaskUrl($torrent);
@@ -252,7 +338,7 @@ class spXunlei
     public function addMagnet($magnet, $options=array())
     {
         if (strpos($magnet, 'magnet:') !== 0) {
-            throw new SPException_Xunlei('invalid magnet url');
+            throw new SPExceptionXunlei('invalid magnet url');
         }
 
         # query task url
@@ -303,7 +389,7 @@ class spXunlei
         $this->log('bt_task_commit: ' . $s);
 
         if (strpos($s, '"progress":1') === false) {
-            throw new SPException_Xunlei('Not yet downloaded');
+            throw new SPExceptionXunlei('Not yet downloaded');
         }
         $m = array();
         preg_match('#"id":"(\d+)"#', $s, $m);
@@ -349,6 +435,12 @@ class spXunlei
         } while (ceil($j['Result']['btnum'] / $j['Result']['btpernum']) >= $page);
     }
 
+    /**
+     * 添加下载任务
+     * @param string $url
+     * @param string $infohash
+     * @param string $filename
+     */
     public function addDownloadTask($url, $infohash, $filename)
     {
         if (!isset($this->cookie_store['gdriveid'])) {
@@ -413,7 +505,7 @@ class spXunlei
     {
         # ed2k://|file|Flight.of.the.Navigator.1986.720p.BluRay.X264-7SinS.mkv|3517912090|D7ABA3230E00007C9887A40106838614|h=H7GB4TSG5KJ7RTBZN7MU5H7XX5KQSHQ3|/
         if (strpos($ed2k, 'ed2k://|file|') !== 0) {
-            throw new SPException_Xunlei('Invalid ed2k url');
+            throw new SPExceptionXunlei('Invalid ed2k url');
         }
         $str = substr(trim($ed2k), strlen('ed2k://|file|'));
         list($filename, $size, $hash, ) = explode('|', $str, 4);
@@ -444,7 +536,7 @@ class spXunlei
         );
         $j = json_decode($fake_json, true);
         if ($j[0] == 0 || $j[0] == 75) {
-            throw new SPException_Xunlei('failed to add ed2k task');
+            throw new SPExceptionXunlei('failed to add ed2k task');
         }
         $task_id = $j[1];
         $this->log('task_commit: output=' . $s);
@@ -468,11 +560,11 @@ class spXunlei
         } while (!$flag_found_task && $pagesize <= 60);
 
         if (!$flag_found_task) {
-            throw new SPException_Xunlei('task add: task not found');
+            throw new SPExceptionXunlei('task add: task not found');
         }
 
         if ($task['download_status'] != 2) {
-            throw new SPException_Xunlei('download not finished');
+            throw new SPExceptionXunlei('download not finished');
         }
         $this->log('task add: tid=' . $task_id . ' infohash=' . $task['cid']);
 
@@ -517,7 +609,7 @@ class spXunlei
         );
         $j = json_decode($fake_json, true);
         if ($j[0] == 0 || $j[0] == 75) {
-            throw new SPException_Xunlei('failed to add default task');
+            throw new SPExceptionXunlei('failed to add default task');
         }
         $task_id = $j[1];
         $this->log('task_commit: output=' . $s);
@@ -541,11 +633,11 @@ class spXunlei
         } while (!$flag_found_task && $pagesize <= 60);
 
         if (!$flag_found_task) {
-            throw new SPException_Xunlei('task add: task not found');
+            throw new SPExceptionXunlei('task add: task not found');
         }
 
         if ($task['download_status'] != 2) {
-            throw new SPException_Xunlei('download not finished');
+            throw new SPExceptionXunlei('download not finished');
         }
         $this->log('task add: tid=' . $task_id . ' infohash=' . $task['cid']);
 
@@ -655,7 +747,7 @@ class spXunlei
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 0);
-            curl_setopt($ch, CURLOPT_VERBOSE, 0);
+            curl_setopt($ch, CURLOPT_VERBOSE, 1);
             curl_setopt($ch, CURLOPT_HEADER, false);
             curl_setopt($ch, CURLOPT_HEADERFUNCTION, array($this, 'curlProcessHeaders'));
             curl_setopt($ch, CURLOPT_COOKIEJAR, $this->config->cookie_file);
@@ -798,6 +890,11 @@ class spXunlei
     }
 }
 
+function timeInMS()
+{
+    return floor(microtime(1) * 1000);
+}
+
 
 /**
  * Config class
@@ -895,12 +992,12 @@ abstract class spXunleiDownloader
         if (!class_exists($class)) {
             $file = SPXL_CLASSROOT . '/downloader/' . $engine . '.php';
             if (!is_file($file)) {
-                throw new SPException_Xunlei('Engine '.$engine.' not found');
+                throw new SPExceptionXunlei('Engine '.$engine.' not found');
             }
 
             require($file);
             if (!class_exists($class)) {
-                throw new SPException_Xunlei('Engine '.$engine.' not found');
+                throw new SPExceptionXunlei('Engine '.$engine.' not found');
             }
         }
 
@@ -928,12 +1025,12 @@ class spXunleiPlugin
         if (!class_exists($class)) {
             $file = SPXL_CLASSROOT . '/plugin/' . $name . '.php';
             if (!is_file($file)) {
-                throw new SPException_Xunlei('Plugin '.$name.' not found');
+                throw new SPExceptionXunlei('Plugin '.$name.' not found');
             }
 
             require($file);
             if (!class_exists($class)) {
-                throw new SPException_Xunlei('Plugin '.$name.' not found');
+                throw new SPExceptionXunlei('Plugin '.$name.' not found');
             }
         }
 
@@ -957,7 +1054,8 @@ if (!class_exists('SPException')) {
     class SPException extends Exception{}
 }
 
-class SPException_Xunlei extends SPException {}
+class SPExceptionXunlei extends SPException {}
+class SPExceptionXunlei_RequestVerify extends SPExceptionXunlei{}
 
 
 
